@@ -33,7 +33,7 @@ class DataProvider(object):
     def _get_next_image(self):
         file_name = self.file_list[self.index]
         # if self.index is out of bound , shuffle list and initalize
-        if self.index <= self.max_index:
+        if self.index < self.max_index:
             self.index += 1
         else:
             random.shuffle(self.file_list)
