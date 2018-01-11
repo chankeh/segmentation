@@ -116,7 +116,7 @@ class Unet(object):
             self.graph = graph
 
     def _predict(self):
-        self.hypothesis = tf.nn.softmax(self.in_node,name="softmax")
+        self.hypothesis = tf.nn.softmax(self.logits,name="softmax")
         self.predictor = tf.argmax(self.hypothesis,axis=3,name="predict")
 
     def _conv_batch_relu(self, in_node, res_node, scope, features):
@@ -147,7 +147,6 @@ class Unet(object):
             correct_pred = tf.equal(flat_pred, flat_label)
             self.accuracy = tf.reduce_mean(
                 tf.cast(correct_pred, tf.float32), name='accuracy')
-
             # Intersection-Over-Union
             intersection = tf.multiply(flat_pred,flat_label)
             union = tf.reduce_sum(flat_label) + tf.reduce_sum(flat_label) - intersection
