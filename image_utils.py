@@ -16,13 +16,19 @@ class DataProvider(object):
     file_list = []
     max_index = 0
     index = 0
-
+    clahe = None
     def __init__(self, img_dir, mask_dir, **kwargs):
         self.mask_dir = mask_dir
         self.img_dir = img_dir
         self.rotate_range = kwargs.get('rotate_range', (1, 360))
         self.img_size = kwargs.get('img_size', (256, 256))
         self.g_size = kwargs.get('gaussian_size', 1)
+        self.clipLimit = kwargs.get('clipLimit',2.0)
+        self.tgsize = kwargs.get('tileGridSize',8)
+
+        #For Pre-Processign (applying clahe)
+        clahe = cv2.createCLAHE(clipLimit=self.clipLimit, tileGridSize=tuple([self.tgsize]*2))
+
         self.file_list = list(set(os.listdir(self.img_dir))
                               & set(os.listdir(self.mask_dir)))
 
@@ -42,17 +48,35 @@ class DataProvider(object):
         img_path = os.path.join(self.img_dir, file_name)
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = self._normalize_data(img)
 
         mask_path = os.path.join(self.mask_dir, file_name)
         mask = cv2.imread(mask_path, 0)
-        mask = self._normalize_data(mask)
 
-        img, mask = self._resize_data(img, mask)
+        img, mask = self._preprocess_data(img, mask)
 
         inv_mask = np.ones_like(mask) - mask
         mask = np.stack([inv_mask, mask], axis=-1)
         return img, mask
+
+    def _preprocess_data(self, img, mask):
+        # clahe 적용
+        img = self._apply_clahe(img)
+
+        # resize to shape of output image
+        img, mask = self._resize_data(img, mask)
+
+        # normalize
+        img = self._normalize_data(img)
+        mask = self._normalize_data(mask)
+
+        return img, mask
+
+    def _apply_clahe(self, img):
+        # 명도를 기준으로 clahe 적용한 후, HSV -> RGB로 하여 이미지 복원
+        hsv = cv2.cvtColor(img,cv2.COLOR_RGB2HSV)
+        img2 = clahe.apply(hsv[...,2])
+        hsv[...,2] = img2
+        return cv2.cvtColor(hsv,cv2.COLOR_HSV2RGB)
 
     def _normalize_data(self, img):
         norm_img = np.zeros_like(img)
