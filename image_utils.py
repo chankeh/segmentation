@@ -11,15 +11,14 @@ import random
 from skimage.transform import rotate
 from skimage.filters import gaussian
 
-
 class DataProvider(object):
     file_list = []
     max_index = 0
     index = 0
     clahe = None
-    def __init__(self, img_dir, mask_dir, **kwargs):
-        self.mask_dir = mask_dir
+    def __init__(self, img_dir, *mask_dirs, **kwargs):
         self.img_dir = img_dir
+        self.mask_dirs = mask_dirs
         self.rotate_range = kwargs.get('rotate_range', (1, 360))
         self.img_size = kwargs.get('img_size', (256, 256))
         self.g_size = kwargs.get('gaussian_size', 1)
@@ -29,9 +28,10 @@ class DataProvider(object):
         #For Pre-Processign (applying clahe)
         clahe = cv2.createCLAHE(clipLimit=self.clipLimit, tileGridSize=tuple([self.tgsize]*2))
 
-        self.file_list = list(set(os.listdir(self.img_dir))
-                              & set(os.listdir(self.mask_dir)))
-
+        file_set = set(os.listdir(self.img_dir))
+        for mask_dir in self.mask_dirs:
+            file_set =  file_set & set(os.listdir(mask_dir))
+        self.file_list = list(file_set)
         print('the number of input data : {}'.format(len(self.file_list)))
         self.max_index = len(self.file_list) - 1
         self.index = 0
@@ -49,27 +49,51 @@ class DataProvider(object):
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        mask_path = os.path.join(self.mask_dir, file_name)
-        mask = cv2.imread(mask_path, 0)
+        masks = self._get_masks(file_name)
+        masks = self._append_inv_masks(masks)
+        img, masks = self._preprocess_data(img, masks)
+        return img, masks
 
-        img, mask = self._preprocess_data(img, mask)
+    def _get_masks(self,file_name):
+        mask_list = []
+        for mask_dir in self.mask_dirs:
+            mask_path = os.path.join(mask_dir, file_name)
+            mask = cv2.imread(mask_path, 0)
+            mask_list.append(mask)
+        if len(mask_list) == 1:
+            return np.expand_dims(mask,axis=-1)
+        else:
+            return np.stack(mask_list,axis=-1)
 
-        inv_mask = np.ones_like(mask) - mask
-        mask = np.stack([inv_mask, mask], axis=-1)
-        return img, mask
+    def _append_inv_masks(self, masks):
+        inv_masks = []
+        for idx in range(masks.shape[-1]):
+            inv_masks.append((~masks[...,idx]).copy())
+        if len(inv_masks) == 1:
+            inv_mask = inv_masks[0].copy()
+        else:
+            inv_mask = inv_masks[0].copy()
+            for i in range(1,len(inv_masks)):
+                inv_mask = cv2.bitwise_and(inv_mask,inv_masks[i])
+        inv_mask = np.expand_dims(inv_mask,axis=-1)
+        masks = np.concatenate([inv_mask,masks],axis=-1)
+        return masks
 
-    def _preprocess_data(self, img, mask):
+    def _preprocess_data(self, img, masks):
         # clahe 적용
         img = self._apply_clahe(img)
-
         # resize to shape of output image
-        img, mask = self._resize_data(img, mask)
-
-        # normalize
-        img = self._normalize_data(img)
-        mask = self._normalize_data(mask)
-
-        return img, mask
+        img = self._resize_data(img)
+        mask_list = []
+        for idx in range(masks.shape[-1]):
+            mask = self._resize_data(masks[...,idx])
+            mask = self._normalize_data(mask)
+            mask_list.append(mask)
+        if len(mask_list) == 1:
+            masks = np.expand_dims(mask,axis=-1)
+        else:
+            masks = np.stack(mask_list,axis=-1)
+        return img, masks
 
     def _apply_clahe(self, img):
         # 명도를 기준으로 clahe 적용한 후, HSV -> RGB로 하여 이미지 복원
@@ -88,10 +112,9 @@ class DataProvider(object):
                 (norm_img.max()-norm_img.min())
         return norm_img
 
-    def _resize_data(self, img, mask):
+    def _resize_data(self, img):
         img = cv2.resize(img, self.img_size)
-        mask = cv2.resize(mask, self.img_size)
-        return img, mask
+        return img
 
     def _augument_data(self, img, mask):
         # rotate image
