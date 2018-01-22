@@ -11,32 +11,35 @@ from skimage.transform import rotate
 from skimage.filters import gaussian
 from skimage.exposure import adjust_gamma
 
+
 class DataProvider(object):
     file_list = []
     max_index = 0
     index = 0
     clahe = None
+
     def __init__(self, img_dir, *mask_dirs, **kwargs):
         self.img_dir = img_dir
         self.mask_dirs = mask_dirs
         self.is_training = kwargs.get('is_training', True)
         self.rotate_range = kwargs.get('rotate_range', (-90, 90))
-        self.gamma_range = kwargs.get('gamma_range',(0.25,4))
-        self.lf_factor = kwargs.get('lf_factor',0.3)
-        self.hf_factor = kwargs.get('hf_Factor',1.5)
+        self.gamma_range = kwargs.get('gamma_range', (0.25, 4))
+        self.lf_factor = kwargs.get('lf_factor', 0.3)
+        self.hf_factor = kwargs.get('hf_Factor', 1.5)
         self.sigma_factor = kwargs.get('sigma', 10)
-        
+
         self.img_size = kwargs.get('img_size', (256, 256))
         self.g_size = kwargs.get('gaussian_size', 1)
-        self.clipLimit = kwargs.get('clipLimit',2.0)
-        self.tgsize = kwargs.get('tileGridSize',8)
+        self.clipLimit = kwargs.get('clipLimit', 2.0)
+        self.tgsize = kwargs.get('tileGridSize', 8)
 
-        #For Pre-Processign (applying clahe)
-        self.clahe = cv2.createCLAHE(clipLimit=self.clipLimit, tileGridSize=tuple([self.tgsize]*2))
+        # For Pre-Processign (applying clahe)
+        self.clahe = cv2.createCLAHE(
+            clipLimit=self.clipLimit, tileGridSize=tuple([self.tgsize]*2))
 
         file_set = set(os.listdir(self.img_dir))
         for mask_dir in self.mask_dirs:
-            file_set =  file_set & set(os.listdir(mask_dir))
+            file_set = file_set & set(os.listdir(mask_dir))
         self.file_list = list(file_set)
         print('the number of input data : {}'.format(len(self.file_list)))
         self.max_index = len(self.file_list) - 1
@@ -57,42 +60,42 @@ class DataProvider(object):
 
         masks = self._get_masks(file_name)
         masks = self._append_inv_masks(masks)
-        
+
         img = self._resize_data(img)
         mask_list = []
         for idx in range(masks.shape[-1]):
-            mask = masks[...,idx]
+            mask = masks[..., idx]
             mask = self._resize_data(mask)
             mask_list.append(mask)
         if len(mask_list) == 1:
-            masks = np.expand_dims(mask,axis=-1)
+            masks = np.expand_dims(mask, axis=-1)
         else:
-            masks = np.stack(mask_list,axis=-1)
+            masks = np.stack(mask_list, axis=-1)
         return img, masks
 
-    def _get_masks(self,file_name):
+    def _get_masks(self, file_name):
         mask_list = []
         for mask_dir in self.mask_dirs:
             mask_path = os.path.join(mask_dir, file_name)
             mask = cv2.imread(mask_path, 0)
             mask_list.append(mask)
         if len(mask_list) == 1:
-            return np.expand_dims(mask,axis=-1)
+            return np.expand_dims(mask, axis=-1)
         else:
-            return np.stack(mask_list,axis=-1)
+            return np.stack(mask_list, axis=-1)
 
     def _append_inv_masks(self, masks):
         inv_masks = []
         for idx in range(masks.shape[-1]):
-            inv_masks.append((~masks[...,idx]).copy())
+            inv_masks.append((~masks[..., idx]).copy())
         if len(inv_masks) == 1:
             inv_mask = inv_masks[0].copy()
         else:
             inv_mask = inv_masks[0].copy()
-            for i in range(1,len(inv_masks)):
-                inv_mask = cv2.bitwise_and(inv_mask,inv_masks[i])
-        inv_mask = np.expand_dims(inv_mask,axis=-1)
-        masks = np.concatenate([inv_mask,masks],axis=-1)
+            for i in range(1, len(inv_masks)):
+                inv_mask = cv2.bitwise_and(inv_mask, inv_masks[i])
+        inv_mask = np.expand_dims(inv_mask, axis=-1)
+        masks = np.concatenate([inv_mask, masks], axis=-1)
         return masks
 
     def _preprocess_data(self, img, masks):
@@ -101,18 +104,18 @@ class DataProvider(object):
         img = self._apply_clahe(img)
         img = self._apply_homomorphic(img)
         img = self._normalize_data(img)
-        
+
         mask_list = []
-        masks = (masks>0).astype(np.uint8)
-        masks[...,0] = 1-masks[...,1:].sum(axis=-1)
-        masks = np.clip(masks,0,1)
+        masks = (masks > 0).astype(np.uint8)
+        masks[..., 0] = 1-masks[..., 1:].sum(axis=-1)
+        masks = np.clip(masks, 0, 1)
         for idx in range(masks.shape[-1]):
-            mask = self._normalize_data(masks[...,idx])
+            mask = self._normalize_data(masks[..., idx])
             mask_list.append(mask)
         if len(mask_list) == 1:
-            masks = np.expand_dims(mask,axis=-1)
+            masks = np.expand_dims(mask, axis=-1)
         else:
-            masks = np.stack(mask_list,axis=-1)
+            masks = np.stack(mask_list, axis=-1)
         return img, masks
 
     def _convert_float_to_uint(self, np_array):
@@ -124,17 +127,17 @@ class DataProvider(object):
         else:
             np_array = (np_array * 255).astype(np.uint8)
             return np.clip(np_array, 0, 255)
-    
+
     def _apply_clahe(self, img):
         # 명도를 기준으로 clahe 적용한 후, HSV -> RGB로 하여 이미지 복원
-        hsv = cv2.cvtColor(img,cv2.COLOR_RGB2HSV)
-        img2 = self.clahe.apply(hsv[...,2])
-        hsv[...,2] = img2
-        return cv2.cvtColor(hsv,cv2.COLOR_HSV2RGB)
+        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+        img2 = self.clahe.apply(hsv[..., 2])
+        hsv[..., 2] = img2
+        return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
 
     def _apply_homomorphic(self, img):
         img_YUV = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
-        y = img_YUV[...,0]
+        y = img_YUV[..., 0]
         rows, cols = y.shape[:2]
 
         imgLog = np.log1p(np.array(y, dtype='float') / 255)
@@ -142,7 +145,7 @@ class DataProvider(object):
 
         X, Y = np.meshgrid(np.linspace(0, N-1, N), np.linspace(0, M-1, M))
         Xc, Yc = np.ceil(N/2), np.ceil(M/2)
-        gaussianNumerator = (X - Xc)**2 + (Y - Yc)**2 # 가우시안 분자 생성
+        gaussianNumerator = (X - Xc)**2 + (Y - Yc)**2  # 가우시안 분자 생성
 
         LPF = np.exp(-gaussianNumerator / (2*self.sigma_factor**2))
         HPF = 1 - LPF
@@ -154,15 +157,17 @@ class DataProvider(object):
         img_LF = np.real(np.fft.ifft2(img_FFT.copy() * LPF_shift, (M, N)))
         img_HF = np.real(np.fft.ifft2(img_FFT.copy() * HPF_shift, (M, N)))
 
-        img_adjusting = self.lf_factor*img_LF[0:rows, 0:cols] + self.hf_factor*img_HF[0:rows, 0:cols]
+        img_adjusting = self.lf_factor * \
+            img_LF[0:rows, 0:cols] + self.hf_factor*img_HF[0:rows, 0:cols]
 
         img_exp = np.expm1(img_adjusting)
-        img_exp = (img_exp - np.min(img_exp)) / (np.max(img_exp) - np.min(img_exp))
-        img_out = np.array(255*img_exp, dtype = 'uint8')
+        img_exp = (img_exp - np.min(img_exp)) / \
+            (np.max(img_exp) - np.min(img_exp))
+        img_out = np.array(255*img_exp, dtype='uint8')
 
-        img_YUV[:,:,0] = img_out
+        img_YUV[:, :, 0] = img_out
         return cv2.cvtColor(img_YUV, cv2.COLOR_YUV2RGB)
-    
+
     def _normalize_data(self, img):
         norm_img = np.zeros_like(img)
         try:
@@ -200,7 +205,7 @@ class DataProvider(object):
         # Flipping Horizontally
         if bool(random.getrandbits(1)):
             img = img[:, ::-1, :]
-            mask = mask[:, ::-1,:]
+            mask = mask[:, ::-1, :]
         # Flipping Vertically
         if bool(random.getrandbits(1)):
             img = img[::-1, ...]
@@ -211,7 +216,7 @@ class DataProvider(object):
         # Gamma correction by raising pixels to a power in [0.25,4]
         gamma_factor = random.uniform(*self.gamma_range)
         img = adjust_gamma(img, gamma_factor)
-        return  img
+        return img
 
     def __call__(self, n):
         imgs = []
@@ -225,7 +230,7 @@ class DataProvider(object):
             else:
                 original = self._normalize_data(img)
             original_imgs.append(original)
-            
+
             img, mask = self._preprocess_data(img, mask)
             imgs.append(img)
             masks.append(mask)
