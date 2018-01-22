@@ -148,6 +148,4 @@ class Unet(object):
             self.accuracy = tf.reduce_mean(
                 tf.cast(correct_pred, tf.float32), name='accuracy')
             # Intersection-Over-Union
-            intersection = tf.reduce_sum(tf.multiply(flat_pred,flat_label))
-            union = tf.reduce_sum(flat_label) + tf.reduce_sum(flat_label) - intersection
-            self.iou = tf.divide(intersection,union,name='iou')
+            self.iou = tf.metrics.mean_iou(flat_pred,flat_label,name="iou")
