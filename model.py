@@ -12,7 +12,7 @@ class Unet(object):
     in_node = None
     label = None
     is_training = None
-    keep_prod = None
+    keep_prob = None
 
     logits = None  # output tensor
     hypothesis = None # Softmax value
@@ -54,7 +54,7 @@ class Unet(object):
             self.label = tf.placeholder(
                 tf.float32, [None, self.height, self.width, self.n_class], name="label")
             self.is_training = tf.placeholder(tf.bool, name='is_training')
-            self.keep_prod = tf.placeholder(tf.float32, name='keep_prod')
+            self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
 
             # l2 regularizer tensor
             if self.l2_scale is not None:
@@ -126,7 +126,7 @@ class Unet(object):
                                   kernel_regularizer=self.regularizer, name='conv')
             if res_node is not None:
                 h1 = tf.add(h1, res_node, name='residual_add')
-            h2 = tf.layers.dropout(h1,self.keep_prod,name='dropout')
+            h2 = tf.layers.dropout(h1,self.keep_prob,name='dropout')
             return h1, tf.nn.relu(h2, 'relu')
 
     def _get_cost(self):

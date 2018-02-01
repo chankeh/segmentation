@@ -5,12 +5,29 @@ from collections import OrderedDict
 import logging
 
 import tensorflow as tf
+'''
+Model : VesselDNN
 
+VesselDNN은 Fundus image 내에서 Pixel-wise로 혈관인지 아닌지를 분류한다.
+이미지 전체를 Unit Patch(27X27)로 나눈 후, 이것을 input으로 하여 구분한다.
+장점은 적은 이미지 수를 바탕으로도, 충분히 데이터를 확보할 수 있다는 점이고,
+단점은 장 당 처리 시간이 다른 모델에 비해 길다는 점이다.
+
+이 코드에서는 graph def를 캡슐화 하였으므로, 학습을 시키기 위해서는
+
+model = VesselDNN()
+with tf.Session(graph=model.graph) as sess:
+    sess.run(init)
+    ~~~~~~~
+로 진행해야 한다.
+
+Reference : Segmenting Retinal Blood vessels with Deep Neural Networks
+'''
 class VesselDNN(object):
     in_node = None
     label = None
     is_training = None
-    keep_prod = None
+    keep_prob = None
 
     logits = None  # output tensor
     hypothesis = None # Softmax value
@@ -46,14 +63,13 @@ class VesselDNN(object):
             self.label = tf.placeholder(
                 tf.float32, [None, self.n_class], name="label")
             self.is_training = tf.placeholder(tf.bool, name='is_training')
-            self.keep_prod = tf.placeholder(tf.float32, name='keep_prod')
+            self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
 
+            # Convolution filter initializer
             xavier_init = tf.contrib.layers.xavier_initializer_conv2d()
-
             # l2 regularizer tensor
             if self.l2_scale is not None:
-                self.regularizer = tf.contrib.layers.l2_regularizer(
-                    scale=self.l2_scale)
+                self.regularizer = tf.contrib.layers.l2_regularizer(scale=self.l2_scale)
             else:
                 self.regularizer = None
 
@@ -69,7 +85,8 @@ class VesselDNN(object):
             conv4 = tf.layers.conv2d(conv3, filters=128, kernel_size=3,strides=(1,1),
                                     kernel_initializer=xavier_init,padding='same',
                                     activation=tf.nn.relu, name='conv4')
-            fc1 = self._fc_dropout_relu(conv4, 'fc1', 512)
+            flatten = tf.contrib.layers.flatten(conv4)
+            fc1 = self._fc_dropout_relu(flatten, 'fc1', 512)
             fc2 = self._fc_dropout_relu(fc1, 'fc2', 512)
 
             self.logits = tf.layers.dense(fc2, 2, activation=None, name='logits')
@@ -84,7 +101,7 @@ class VesselDNN(object):
         with tf.variable_scope(scope):
             h1 = tf.layers.dense(in_node, units=units, activation=None,
                                   kernel_regularizer=self.regularizer, name='fc')
-            h2 = tf.layers.dropout(h1,self.keep_prod,name='dropout')
+            h2 = tf.layers.dropout(h1,self.keep_prob,name='dropout')
             return tf.nn.relu(h2, 'relu')
 
     def _get_cost(self):

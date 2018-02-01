@@ -13,6 +13,15 @@ import cv2
 from skimage.transform import rotate, rescale
 from skimage.exposure import adjust_gamma
 
+import pydensecrf.densecrf as dcrf
+from pydensecrf.utils import unary_from_softmax
+
+'''
+DataProvider
+
+
+'''
+
 class DataProvider(object):
     file_list = []
     max_index = 0
@@ -26,6 +35,9 @@ class DataProvider(object):
         self.is_training = kwargs.get('is_training', False)
         self.patch_size = kwargs.get('patch_size', 27)
         self.us_ratio = kwargs.get('undersample_ratio',0.3)
+        clipLimit = kwargs.get("clipLimit",2.)
+        tileGridSize = kwargs.get("tileGridSize",8)
+        self.clahe = cv2.createCLAHE(clipLimit=clipLimit, tileGridSize=(tileGridSize,tileGridSize))
 
         self.label_dir = os.path.join(self.data_dir, 'label/')
         self.mask_dir = os.path.join(self.data_dir, 'mask/')
@@ -33,6 +45,7 @@ class DataProvider(object):
         self.file_list = [path for path in os.listdir(
             self.img_dir) if os.path.splitext(path)[1] == '.png']
         print('the number of input data : {}'.format(len(self.file_list)))
+
         self.max_index = len(self.file_list) - 1
         self.index = 0
 
@@ -67,7 +80,7 @@ class DataProvider(object):
         center = (center_x, center_y)
         x_min, y_min = np.argwhere(dst).min(axis=0)
         x_max, y_max = np.argwhere(dst).max(axis=0)
-        radius = min((x_max-x_min)//2, (y_max-y_min)//2)-self.patch_size
+        radius = min((x_max-x_min)//2, (y_max-y_min)//2)-self.patch_size//2
         mask = np.zeros_like(dst)
         cv2.circle(mask, center, radius, 255, -1)
         return mask
@@ -126,13 +139,20 @@ class DataProvider(object):
         pad_size = math.ceil(self.patch_size/2)
         pos_patches = []
         for x, y in np.argwhere(label & mask):
-            patch = img[x-pad_size:x+pad_size-1, y-pad_size:y+pad_size-1]
+            patch = img[x-pad_size+1:x+pad_size, y-pad_size+1:y+pad_size]
             pos_patches.append(patch)
         neg_patches = []
         for x, y in np.argwhere((~label) & mask):
-            patch = img[x-pad_size:x+pad_size-1, y-pad_size:y+pad_size-1]
+            patch = img[x-pad_size+1:x+pad_size, y-pad_size+1:y+pad_size]
             neg_patches.append(patch)
         return pos_patches, neg_patches
+
+    def _apply_clahe(self, image):
+        lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+        lab_planes = cv2.split(lab)
+        lab_planes[0] = self.clahe.apply(lab_planes[0])
+        lab = cv2.merge(lab_planes)
+        return cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
 
     def _apply_gcn(self, patch):
         # global contrast normalization per patch
@@ -164,6 +184,7 @@ class DataProvider(object):
         label_dataset = []
         for _ in range(self.max_index):
             label, mask, img = self._get_next_image()
+            img = self._apply_clahe(img)
             if self.is_training:
                 label, mask, img = self._augument_data(label, mask, img)
             pos_patches, neg_patches = self._extract_patches_in_image(label, mask, img)
@@ -194,3 +215,24 @@ class DataProvider(object):
         patch_dataset = np.stack(patch_dataset)
         label_dataset = np.array(label_dataset)
         return patch_dataset, label_dataset
+
+def apply_crf(softmax, image, nlabels=2,infer_nums=10):
+    transposed_softmax = softmax.transpose((2,0,1))
+    height, width = image.shape[:2]
+
+    # DenseCRF 선언
+    dense_crf = dcrf.DenseCRF2D(width, height,nlabels)
+    # Unary Potential Setting
+    unary = unary_from_softmax(transposed_softmax)
+    dense_crf.setUnaryEnergy(unary)
+    # Pairwise Potential Setting
+    dense_crf.addPairwiseBilateral(sxy=100,
+                                   srgb=(1,1,1),
+                                   rgbim=image,
+                                   compat=1,
+                                   kernel=dcrf.DIAG_KERNEL,
+                                   normalization=dcrf.NORMALIZE_SYMMETRIC)
+    # Inferencing
+    Q = dense_crf.inference(infer_nums)
+    res = np.argmax(Q, axis=0).reshape((height, width))
+    return res
