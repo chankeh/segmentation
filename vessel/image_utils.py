@@ -21,7 +21,6 @@ DataProvider
 
 
 '''
-
 class DataProvider(object):
     file_list = []
     max_index = 0
@@ -34,7 +33,7 @@ class DataProvider(object):
         self.data_dir = data_dir
         self.is_training = kwargs.get('is_training', False)
         self.patch_size = kwargs.get('patch_size', 27)
-        self.us_ratio = kwargs.get('undersample_ratio',0.3)
+        self.label_ratio = kwargs.get('label_ratio',0.3)
         clipLimit = kwargs.get("clipLimit",2.)
         tileGridSize = kwargs.get("tileGridSize",8)
         self.clahe = cv2.createCLAHE(clipLimit=clipLimit, tileGridSize=(tileGridSize,tileGridSize))
@@ -75,15 +74,17 @@ class DataProvider(object):
         dst = np.zeros_like(raw)
 
         cv2.normalize(raw, dst, 0, 255, cv2.NORM_MINMAX)
-        center_x = dst.shape[1] // 2
-        center_y = dst.shape[0] // 2
-        center = (center_x, center_y)
-        x_min, y_min = np.argwhere(dst).min(axis=0)
-        x_max, y_max = np.argwhere(dst).max(axis=0)
-        radius = min((x_max-x_min)//2, (y_max-y_min)//2)-self.patch_size//2
-        mask = np.zeros_like(dst)
-        cv2.circle(mask, center, radius, 255, -1)
-        return mask
+        pad_size = int((self.patch_size//2+1)*1.5)
+
+        blank = np.ones_like(dst)
+
+        blank[:pad_size,...] = 0
+        blank[-pad_size:,...] = 0
+        blank[:,:pad_size,...] = 0
+        blank[:,-pad_size:,...] = 0
+        dst = cv2.bitwise_and(dst,dst,mask=blank)
+
+        return dst
 
     def _read_img(self, file_name):
         img_path = os.path.join(self.img_dir, file_name)
@@ -135,14 +136,20 @@ class DataProvider(object):
         img = adjust_gamma(img, gamma_factor)
         return img
 
-    def _extract_patches_in_image(self, label, mask, img):
+    def _extract_patches_in_image(self, label, mask, img, batch_size):
         pad_size = math.ceil(self.patch_size/2)
+
+        pos_batch_size = int(batch_size * self.label_ratio)
         pos_patches = []
-        for x, y in np.argwhere(label & mask):
+        pos_arg_list = random.choices(np.argwhere(label & mask),k=pos_batch_size)
+        for x, y in pos_arg_list:
             patch = img[x-pad_size+1:x+pad_size, y-pad_size+1:y+pad_size]
             pos_patches.append(patch)
+
+        neg_batch_size = batch_size - pos_batch_size
         neg_patches = []
-        for x, y in np.argwhere((~label) & mask):
+        neg_batch_size = random.choices(np.argwhere((~label) & mask),k=neg_batch_size)
+        for x, y in neg_batch_size:
             patch = img[x-pad_size+1:x+pad_size, y-pad_size+1:y+pad_size]
             neg_patches.append(patch)
         return pos_patches, neg_patches
@@ -182,14 +189,16 @@ class DataProvider(object):
         batch_size = n // self.max_index
         patches_list = []
         label_dataset = []
-        for _ in range(self.max_index):
+        for i in range(self.max_index):
             label, mask, img = self._get_next_image()
             img = self._apply_clahe(img)
             if self.is_training:
                 label, mask, img = self._augument_data(label, mask, img)
-            pos_patches, neg_patches = self._extract_patches_in_image(label, mask, img)
+            if self.max_index == i-1:
+                remain_batch = n - batch_size*self.max_index
+                batch_size += remain_batch
+            pos_patches, neg_patches = self._extract_patches_in_image(label, mask, img, batch_size)
             # undersampling for label imbalancing
-            neg_patches = random.choices(neg_patches, k=int(len(neg_patches)*self.us_ratio))
             pos_size = len(pos_patches)
             neg_size = len(neg_patches)
             pos_labels = [[0,1]]*pos_size
@@ -197,12 +206,10 @@ class DataProvider(object):
 
             patches = pos_patches + neg_patches
             labels = pos_labels + neg_labels
-
             dataset = list(zip(patches, labels))
             random.shuffle(dataset)
 
-            patches, labels = list(zip(*dataset[:batch_size]))
-
+            patches, labels = list(zip(*dataset))
             patches_list.extend(list(patches))
             label_dataset.extend(labels)
 
