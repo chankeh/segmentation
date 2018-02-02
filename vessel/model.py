@@ -58,44 +58,45 @@ class VesselDNN(object):
 
         with tf.Graph().as_default() as graph:
             # input tensor
-            self.in_node = tf.placeholder(
-                tf.float32, [None, self.height, self.width, self.channels], name="input")
-            self.label = tf.placeholder(
-                tf.float32, [None, self.n_class], name="label")
-            self.is_training = tf.placeholder(tf.bool, name='is_training')
-            self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
+            with tf.variable_scope("vesselDNN"):
+                self.in_node = tf.placeholder(
+                    tf.float32, [None, self.height, self.width, self.channels], name="input")
+                self.label = tf.placeholder(
+                    tf.float32, [None, self.n_class], name="label")
+                self.is_training = tf.placeholder(tf.bool, name='is_training')
+                self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
 
-            # Convolution filter initializer
-            xavier_init = tf.contrib.layers.xavier_initializer_conv2d()
-            # l2 regularizer tensor
-            if self.l2_scale is not None:
-                self.regularizer = tf.contrib.layers.l2_regularizer(scale=self.l2_scale)
-            else:
-                self.regularizer = None
+                # Convolution filter initializer
+                xavier_init = tf.contrib.layers.xavier_initializer_conv2d()
+                # l2 regularizer tensor
+                if self.l2_scale is not None:
+                    self.regularizer = tf.contrib.layers.l2_regularizer(scale=self.l2_scale)
+                else:
+                    self.regularizer = None
 
-            conv1 = tf.layers.conv2d(self.in_node, filters=64, kernel_size=3,strides=(1,1),
+                conv1 = tf.layers.conv2d(self.in_node, filters=64, kernel_size=3,strides=(1,1),
+                                            kernel_initializer=xavier_init,padding='same',
+                                            activation=tf.nn.relu, name='conv1')
+                conv2 = tf.layers.conv2d(conv1, filters=64, kernel_size=3,strides=(1,1),
                                         kernel_initializer=xavier_init,padding='same',
-                                        activation=tf.nn.relu, name='conv1')
-            conv2 = tf.layers.conv2d(conv1, filters=64, kernel_size=3,strides=(1,1),
-                                    kernel_initializer=xavier_init,padding='same',
-                                    activation=tf.nn.relu, name='conv2')
-            conv3 = tf.layers.conv2d(conv2, filters=128, kernel_size=3,strides=(1,1),
-                                    kernel_initializer=xavier_init,padding='same',
-                                    activation=tf.nn.relu, name='conv3')
-            conv4 = tf.layers.conv2d(conv3, filters=128, kernel_size=3,strides=(1,1),
-                                    kernel_initializer=xavier_init,padding='same',
-                                    activation=tf.nn.relu, name='conv4')
-            flatten = tf.contrib.layers.flatten(conv4)
-            fc1 = self._fc_dropout_relu(flatten, 'fc1', 512)
-            fc2 = self._fc_dropout_relu(fc1, 'fc2', 512)
+                                        activation=tf.nn.relu, name='conv2')
+                conv3 = tf.layers.conv2d(conv2, filters=128, kernel_size=3,strides=(1,1),
+                                        kernel_initializer=xavier_init,padding='same',
+                                        activation=tf.nn.relu, name='conv3')
+                conv4 = tf.layers.conv2d(conv3, filters=128, kernel_size=3,strides=(1,1),
+                                        kernel_initializer=xavier_init,padding='same',
+                                        activation=tf.nn.relu, name='conv4')
+                flatten = tf.contrib.layers.flatten(conv4)
+                fc1 = self._fc_dropout_relu(flatten, 'fc1', 512)
+                fc2 = self._fc_dropout_relu(fc1, 'fc2', 512)
 
-            self.logits = tf.layers.dense(fc2, 2, activation=None, name='logits')
-            self.hypothesis = tf.nn.softmax(self.logits, name='softmax')
-            self.predictor = tf.argmax(self.hypothesis,axis=1,name="predict")
-            self.logger.info("[output] output shape : {}".format(self.logits.shape))
-            self._get_cost() # cost tensor
-            self._get_acc() # accuracy tensor
-            self.graph = graph
+                self.logits = tf.layers.dense(fc2, 2, activation=None, name='logits')
+                self.hypothesis = tf.nn.softmax(self.logits, name='softmax')
+                self.predictor = tf.argmax(self.hypothesis,axis=1,name="predict")
+                self.logger.info("[output] output shape : {}".format(self.logits.shape))
+                self._get_cost() # cost tensor
+                self._get_acc() # accuracy tensor
+                self.graph = graph
 
     def _fc_dropout_relu(self, in_node, scope, units):
         with tf.variable_scope(scope):
