@@ -243,3 +243,123 @@ def apply_crf(softmax, image, nlabels=2,infer_nums=10):
     Q = dense_crf.inference(infer_nums)
     res = np.argmax(Q, axis=0).reshape((height, width))
     return res
+
+
+class vesselDraw(object):
+    def __init__(self, meta_graph_path, variable_path):
+        self.batch_size = 256
+
+        # Tensorflow Model Restoring
+        tf.reset_default_graph()
+        self.sess =  tf.Session()
+        saver = tf.train.import_meta_graph(meta_graph_path)
+        init = [tf.global_variables_initializer(), tf.local_variables_initializer()]
+        self.sess.run(init)
+        saver.restore(self.sess, variable_path)
+        self.graph = tf.get_default_graph()
+        self.softmax = self.graph.get_tensor_by_name("softmax:0")
+
+    def run_vessel_segmentation(self,img):
+        patches = self.get_input_patches(img)
+        y_list = []
+        for idx in range(len(patches)//self.batch_size+1):
+            x = np.stack(patches[self.batch_size*idx:self.batch_size*(idx+1)])
+            y = self.sess.run(self.softmax,feed_dict={"input:0":x,"keep_prob:0":1.})
+            y_list.append(y)
+        result = np.concatenate(y_list)
+
+        output_size = int(np.sqrt(len(result)))
+
+        vessel = result[...,1].reshape((output_size,output_size))
+        vessel = np.pad(vessel,14,mode='constant')[:-1,:-1]
+        vessel = np.stack([1-vessel,vessel],axis=-1)
+        return vessel
+
+    def get_input_patches(self,img):
+        img = self.apply_clahe(img)
+        patches = self.extract_patches_in_image(img)
+        patches = [self.apply_gcn(patch) for patch in patches]
+        return patches
+
+    def apply_clahe(self,image):
+        lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+        lab_planes = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        lab_planes[0] = clahe.apply(lab_planes[0])
+        lab = cv2.merge(lab_planes)
+        return cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+
+    def extract_patches_in_image(self,img,patch_size=27):
+        pad_size = math.ceil(patch_size/2)
+        patches = []
+        for x in range(pad_size,img.shape[0]-pad_size+1):
+            for y in range(pad_size,img.shape[1]-pad_size+1):
+                patch = img[x-pad_size:x+pad_size-1, y-pad_size:y+pad_size-1]
+                patches.append(patch)
+        return patches
+
+    def normalize_data(self,img):
+        norm_img = np.zeros_like(img)
+        try:
+            norm_img = cv2.normalize(img, norm_img, alpha=0, beta=1,
+                                     norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+        except TypeError as e:
+            norm_img = (norm_img - norm_img.min()) / \
+                (norm_img.max()-norm_img.min())
+        return norm_img
+
+    def apply_gcn(self,patch):
+        hsv = cv2.cvtColor(patch, cv2.COLOR_RGB2HSV)
+        blank = np.zeros_like(hsv[..., 2])
+        std_hsv = (hsv[..., 2]-hsv[..., 2].mean())/hsv[..., 2].std()
+        hsv[..., 2] = cv2.normalize(std_hsv, blank, 0, 255, cv2.NORM_MINMAX)
+        result = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+        # apply gaussian blur to reduce noise
+        result = cv2.GaussianBlur(result, (3, 3), 0)
+        result = self.normalize_data(result)
+        return result
+
+    def apply_crf(self,softmax, image, **kwargs):
+        transposed_softmax = softmax.transpose((2,0,1))
+        height, width = image.shape[:2]
+
+        nlabels = kwargs.get("nlabels",2)
+        infer_nums = kwargs.get("infer_nums",3)
+
+        sxy = kwargs.get("sxy",(80,80))
+        srgb = kwargs.get("srgb",(13,13,13))
+        compat = kwargs.get("compat",2)
+
+        kernel = kwargs.get("kernel", dcrf.DIAG_KERNEL)
+        normalization = kwargs.get("normalization", dcrf.NORMALIZE_SYMMETRIC)
+
+        # DenseCRF 선언
+        dense_crf = dcrf.DenseCRF2D(width, height,nlabels)
+        # Unary Potential Setting
+        unary = unary_from_softmax(transposed_softmax)
+        dense_crf.setUnaryEnergy(unary)
+        # Pairwise Potential Setting
+        dense_crf.addPairwiseBilateral(sxy=sxy,
+                                       srgb=srgb,
+                                       rgbim=image,
+                                       compat=compat,
+                                       kernel=kernel,
+                                       normalization=normalization)
+        # Inferencing
+        Q = dense_crf.inference(infer_nums)
+        res = np.argmax(Q, axis=0).reshape((height, width))
+        return res
+
+    def __call__(self,img_path):
+        if isinstance(img_path,str):
+            img = cv2.imread(img_path)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = cv2.resize(img,(512,512))
+        elif isinstance(img_path,np.ndarray):
+            img = img_path
+            img = cv2.resize(img,(512,512))
+
+        vessel_softmax = self.run_vessel_segmentation(img)
+        result = self.apply_crf(vessel_softmax, img)
+
+        return result, vessel_softmax
