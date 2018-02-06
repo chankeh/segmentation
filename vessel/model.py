@@ -1,3 +1,4 @@
+#-*-coding utf-8-*-
 import os
 import shutil
 import numpy as np
@@ -10,6 +11,13 @@ Model : VesselDNN
 
 VesselDNN은 Fundus image 내에서 Pixel-wise로 혈관인지 아닌지를 분류한다.
 이미지 전체를 Unit Patch(27X27)로 나눈 후, 이것을 input으로 하여 구분한다.
+
+Conv Layer가 4층으로 이루어져 있고(64,64,128,128)
+FC Layer가 2층으로 이루어져 있는 (512,512) 단순한 구조이다.
+
+성능향상을 위해선, image_utils에서 이미지 전처리를 크게
+CLAHE 알고리즘과 GCN(global Contrast Normalization)을 통해 높혔다.
+
 장점은 적은 이미지 수를 바탕으로도, 충분히 데이터를 확보할 수 있다는 점이고,
 단점은 장 당 처리 시간이 다른 모델에 비해 길다는 점이다.
 
@@ -58,45 +66,46 @@ class VesselDNN(object):
 
         with tf.Graph().as_default() as graph:
             # input tensor
-            with tf.variable_scope("vesselDNN"):
-                self.in_node = tf.placeholder(
-                    tf.float32, [None, self.height, self.width, self.channels], name="input")
-                self.label = tf.placeholder(
-                    tf.float32, [None, self.n_class], name="label")
-                self.is_training = tf.placeholder(tf.bool, name='is_training')
-                self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
+            self.in_node = tf.placeholder(
+                tf.float32, [None, self.height, self.width, self.channels], name="input")
+            self.label = tf.placeholder(
+                tf.float32, [None, self.n_class], name="label")
+            self.is_training = tf.placeholder(tf.bool, name='is_training')
+            self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
 
-                # Convolution filter initializer
-                xavier_init = tf.contrib.layers.xavier_initializer_conv2d()
-                # l2 regularizer tensor
-                if self.l2_scale is not None:
-                    self.regularizer = tf.contrib.layers.l2_regularizer(scale=self.l2_scale)
-                else:
-                    self.regularizer = None
+            # Convolution filter initializer
+            xavier_init = tf.contrib.layers.xavier_initializer_conv2d()
+            # l2 regularizer tensor
+            if self.l2_scale is not None:
+                self.regularizer = tf.contrib.layers.l2_regularizer(scale=self.l2_scale)
+            else:
+                self.regularizer = None
 
-                conv1 = tf.layers.conv2d(self.in_node, filters=64, kernel_size=3,strides=(1,1),
-                                            kernel_initializer=xavier_init,padding='same',
-                                            activation=tf.nn.relu, name='conv1')
-                conv2 = tf.layers.conv2d(conv1, filters=64, kernel_size=3,strides=(1,1),
+            conv1 = tf.layers.conv2d(self.in_node, filters=64, kernel_size=3,strides=(1,1),
                                         kernel_initializer=xavier_init,padding='same',
-                                        activation=tf.nn.relu, name='conv2')
-                conv3 = tf.layers.conv2d(conv2, filters=128, kernel_size=3,strides=(1,1),
-                                        kernel_initializer=xavier_init,padding='same',
-                                        activation=tf.nn.relu, name='conv3')
-                conv4 = tf.layers.conv2d(conv3, filters=128, kernel_size=3,strides=(1,1),
-                                        kernel_initializer=xavier_init,padding='same',
-                                        activation=tf.nn.relu, name='conv4')
-                flatten = tf.contrib.layers.flatten(conv4)
-                fc1 = self._fc_dropout_relu(flatten, 'fc1', 512)
-                fc2 = self._fc_dropout_relu(fc1, 'fc2', 512)
+                                        activation=tf.nn.relu, name='conv1')
+            conv2 = tf.layers.conv2d(conv1, filters=64, kernel_size=3,strides=(1,1),
+                                    kernel_initializer=xavier_init,padding='same',
+                                    activation=tf.nn.relu, name='conv2')
+            conv3 = tf.layers.conv2d(conv2, filters=128, kernel_size=3,strides=(1,1),
+                                    kernel_initializer=xavier_init,padding='same',
+                                    activation=tf.nn.relu, name='conv3')
+            conv4 = tf.layers.conv2d(conv3, filters=128, kernel_size=3,strides=(1,1),
+                                    kernel_initializer=xavier_init,padding='same',
+                                    activation=tf.nn.relu, name='conv4')
+            flatten = tf.contrib.layers.flatten(conv4)
+            fc1 = self._fc_dropout_relu(flatten, 'fc1', 512)
+            fc2 = self._fc_dropout_relu(fc1, 'fc2', 512)
 
+            with tf.variable_scope("out"):
                 self.logits = tf.layers.dense(fc2, 2, activation=None, name='logits')
                 self.hypothesis = tf.nn.softmax(self.logits, name='softmax')
                 self.predictor = tf.argmax(self.hypothesis,axis=1,name="predict")
-                self.logger.info("[output] output shape : {}".format(self.logits.shape))
-                self._get_cost() # cost tensor
-                self._get_acc() # accuracy tensor
-                self.graph = graph
+
+            self.logger.info("[output] output shape : {}".format(self.logits.shape))
+            self._get_cost() # cost tensor
+            self._get_acc() # accuracy tensor
+            self.graph = graph
 
     def _fc_dropout_relu(self, in_node, scope, units):
         with tf.variable_scope(scope):
