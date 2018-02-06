@@ -35,7 +35,7 @@ class DataProvider(object):
 
         # For Pre-Processign (applying clahe)
         self.clahe = cv2.createCLAHE(
-            clipLimit=self.clipLimit, tileGridSize=tuple([self.tgsize]*2))
+            clipLimit=self.clipLimit, tileGridSize=tuple([self.tgsize] * 2))
 
         file_set = set(os.listdir(self.img_dir))
         for mask_dir in self.mask_dirs:
@@ -107,7 +107,7 @@ class DataProvider(object):
 
         mask_list = []
         masks = (masks > 0).astype(np.uint8)
-        masks[..., 0] = 1-masks[..., 1:].sum(axis=-1)
+        masks[..., 0] = 1 - masks[..., 1:].sum(axis=-1)
         masks = np.clip(masks, 0, 1)
         for idx in range(masks.shape[-1]):
             mask = self._normalize_data(masks[..., idx])
@@ -141,13 +141,13 @@ class DataProvider(object):
         rows, cols = y.shape[:2]
 
         imgLog = np.log1p(np.array(y, dtype='float') / 255)
-        M, N = 2*rows + 1, 2*cols + 1
+        M, N = 2 * rows + 1, 2 * cols + 1
 
-        X, Y = np.meshgrid(np.linspace(0, N-1, N), np.linspace(0, M-1, M))
-        Xc, Yc = np.ceil(N/2), np.ceil(M/2)
+        X, Y = np.meshgrid(np.linspace(0, N - 1, N), np.linspace(0, M - 1, M))
+        Xc, Yc = np.ceil(N / 2), np.ceil(M / 2)
         gaussianNumerator = (X - Xc)**2 + (Y - Yc)**2  # 가우시안 분자 생성
 
-        LPF = np.exp(-gaussianNumerator / (2*self.sigma_factor**2))
+        LPF = np.exp(-gaussianNumerator / (2 * self.sigma_factor**2))
         HPF = 1 - LPF
 
         LPF_shift = np.fft.ifftshift(LPF.copy())
@@ -158,12 +158,12 @@ class DataProvider(object):
         img_HF = np.real(np.fft.ifft2(img_FFT.copy() * HPF_shift, (M, N)))
 
         img_adjusting = self.lf_factor * \
-            img_LF[0:rows, 0:cols] + self.hf_factor*img_HF[0:rows, 0:cols]
+            img_LF[0:rows, 0:cols] + self.hf_factor * img_HF[0:rows, 0:cols]
 
         img_exp = np.expm1(img_adjusting)
         img_exp = (img_exp - np.min(img_exp)) / \
             (np.max(img_exp) - np.min(img_exp))
-        img_out = np.array(255*img_exp, dtype='uint8')
+        img_out = np.array(255 * img_exp, dtype='uint8')
 
         img_YUV[:, :, 0] = img_out
         return cv2.cvtColor(img_YUV, cv2.COLOR_YUV2RGB)
@@ -175,7 +175,7 @@ class DataProvider(object):
                                      norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
         except TypeError as e:
             norm_img = (norm_img - norm_img.min()) / \
-                (norm_img.max()-norm_img.min())
+                (norm_img.max() - norm_img.min())
         return norm_img
 
     def _resize_data(self, img):
